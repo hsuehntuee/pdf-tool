@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+uvicorn>=0.30
+python-multipart>=0.0.9
+itsdangerous>=2.1
+pymupdf>=1.25
+pillow>=10

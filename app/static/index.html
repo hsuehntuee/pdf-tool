@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Tool</title>
+<meta name="theme-color" content="#e5322d">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/static/icon.svg">
+<link rel="manifest" href="/manifest.webmanifest">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#" id="home"><span class="logo">PDF</span> PDF Tool</a>
+  <span class="spacer"></span>
+  <span class="badge" title="上傳的檔案只存在伺服器記憶體中，處理完即丟棄，不寫入硬碟">🔒 記憶體處理 · 不留存</span>
+  <button class="icon-btn" id="theme" title="切換深淺色">◐</button>
+  <button class="icon-btn" id="logout" title="登出">登出</button>
+</header>
+<main id="app"></main>
+<input type="file" id="picker" class="hidden" multiple>
+<script src="/static/app.js"></script>
+</body>
+</html>

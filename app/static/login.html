@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Tool 登入</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/static/icon.svg">
+<link rel="manifest" href="/manifest.webmanifest">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="panel login" id="f">
+    <div class="brand"><span class="logo">PDF</span> PDF Tool</div>
+    <h1>登入</h1>
+    <p>你的私人 PDF 工作台：檔案只在記憶體處理，不留存。</p>
+    <div class="opt"><label for="u">帳號</label><input type="text" id="u" autocomplete="username" value="admin" required></div>
+    <div class="opt"><label for="p">密碼</label><input type="password" id="p" autocomplete="current-password" required autofocus></div>
+    <button class="btn block" id="go">登入</button>
+    <div class="err hidden" id="e"></div>
+  </form>
+</div>
+<script>
+document.getElementById('f').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const e = document.getElementById('e'), go = document.getElementById('go');
+  go.disabled = true; e.classList.add('hidden');
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: u.value.trim(), password: p.value }) });
+    if (r.ok) { location.href = '/'; return; }
+    e.textContent = (await r.json()).error || '登入失敗';
+  } catch { e.textContent = '連不到伺服器'; }
+  e.classList.remove('hidden'); go.disabled = false;
+});
+</script>
+</body>
+</html>
