@@ -198,3 +198,10 @@ main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; }
   .card h3 { font-size: 14px; }
   .card p { font-size: 12px; line-height: 1.4; }
 }
+
+/* guest mode */
+.guest { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 13px; color: var(--muted); margin: 0 0 16px; text-align: center; }
+.guest a { color: var(--accent); font-weight: 600; }
+.card.locked { opacity: .55; }
+.card.locked:hover { opacity: .8; }
+.lockmark { font-size: 13px; }

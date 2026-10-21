@@ -188,8 +188,10 @@ async function inspect(item) {
   fd.append('files', item.file, item.name);
   if (item.password) fd.append('password', item.password);
   try {
-    const [info] = await postJSON('/api/info', fd);
+    const [info] = S.authed ? await postJSON('/api/info', fd) : [await Edge.info(item.file)];
+    if (!S.authed && info.locked) info.lockedMsg = '🔒 加密檔案需登入後處理';
     item.pages = info.pages; item.locked = info.locked; item.encrypted = info.encrypted; item.metadata = info.metadata || {};
+    if (info.lockedMsg) item.err = info.lockedMsg;
     if (S.tool.meta && S.files[0] === item) for (const [k, v] of Object.entries(item.metadata)) if (`meta.${k}` in S.opts) S.opts[`meta.${k}`] = v;
     if (!item.locked) await loadThumbs(item);
   } catch (e) { item.err = e.message; }
@@ -197,12 +199,15 @@ async function inspect(item) {
 }
 
 async function loadThumbs(item) {
-  const fd = new FormData();
-  fd.append('files', item.file, item.name);
-  if (item.password) fd.append('password', item.password);
-  fd.append('width', S.tool.organizer ? '220' : '90');
-  if (!S.tool.organizer) fd.append('limit', '1');
-  const { thumbs } = await postJSON('/api/thumbs', fd);
+  const width = S.tool.organizer ? 220 : 90, limit = S.tool.organizer ? 500 : 1;
+  let thumbs;
+  if (S.authed) {
+    const fd = new FormData();
+    fd.append('files', item.file, item.name);
+    if (item.password) fd.append('password', item.password);
+    fd.append('width', width); fd.append('limit', limit);
+    ({ thumbs } = await postJSON('/api/thumbs', fd));
+  } else thumbs = await Edge.thumbs(item.file, width, limit);
   item.thumb = thumbs[0];
   if (S.tool.organizer) {
     item.thumbs = thumbs;
@@ -248,11 +253,20 @@ async function runTool() {
   const groups = t.multi || !S.files.length ? [S.files] : S.files.map((f) => [f]);
   try {
     for (const [i, group] of groups.entries()) {
+      S.batch = groups.length > 1 ? `${i + 1} / ${groups.length}` : '';
+      if (!S.authed) {
+        S.progress = 1; paintProgress();
+        const out = await Edge.run(t.id, group.map((f) => f.file), collectOpts(group.length === 1 ? group[0] : null), S.extra);
+        const r = { name: out.name, blob: out.blob, url: URL.createObjectURL(out.blob), inSize: group.reduce((a, f) => a + f.size, 0),
+          outSize: out.blob.size, type: out.blob.type.split(';')[0], text: out.blob.type.startsWith('text/') ? await out.blob.text() : null };
+        S.results.push(r);
+        if (groups.length === 1) download(r);
+        continue;
+      }
       const fd = new FormData();
       group.forEach((f) => fd.append('files', f.file, f.name));
       if (S.extra) fd.append('extra', S.extra, S.extra.name);
       fd.append('options', JSON.stringify(collectOpts(group.length === 1 ? group[0] : null)));
-      S.batch = groups.length > 1 ? `${i + 1} / ${groups.length}` : '';
       const x = await post(`/api/run/${t.id}`, fd, (p) => { S.progress = p; paintProgress(); });
       const name = decodeURIComponent(x.getResponseHeader('X-Filename') || 'output.pdf');
       const blob = x.response;
@@ -322,10 +336,13 @@ window.addEventListener('pointercancel', endDrag);
 /* ───────────── views ───────────── */
 
 function go(id) { location.hash = id ? `#/${id}` : '#/'; }
+const canUse = (t) => S.authed || Edge.tools.has(t.id);
+const toLogin = (next = '') => { location.href = `/login${next ? `?next=${encodeURIComponent(next)}` : ''}`; };
 
 function route() {
   const id = location.hash.replace(/^#\/?/, '');
   const t = byId[id];
+  if (t && !canUse(t)) { toLogin(`#/${id}`); return; }
   S.tool = t || null; S.files = []; S.pages = []; S.results = []; S.error = ''; S.extra = null;
   S.opts = {};
   if (t) for (const d of t.opts) if ('def' in d) S.opts[d.k] = Array.isArray(d.def) ? [...d.def] : d.def;
@@ -343,12 +360,16 @@ function renderHome() {
     oninput: (e) => { homeQuery = e.target.value; const pos = e.target.selectionStart; render(); const s = $('.search'); s.focus(); s.setSelectionRange(pos, pos); } });
   return h('div', {},
     h('section', { class: 'hero' }, h('h1', {}, '你的私人 PDF 工具箱'),
-      h('p', {}, `${TOOLS.length} 種工具 · 全部在你自己的機器上處理 · 不上傳第三方、不寫入硬碟`), search),
+      h('p', {}, S.authed ? `${TOOLS.length} 種工具 · 全部在你自己的機器上處理 · 不上傳第三方、不寫入硬碟`
+        : `訪客模式：${Edge.tools.size} 種工具直接在你的瀏覽器裡執行，檔案完全不會上傳`), search),
+    !S.authed && h('div', { class: 'guest' }, '🔒 標示的工具（壓縮、加密、解密…）要用伺服器運算，需',
+      h('a', { href: '/login', onclick: (e) => { e.preventDefault(); toLogin(); } }, '登入'), '才能使用'),
     h('div', { class: 'cats' }, [['all', '全部'], ...Object.entries(CATS).map(([k, [n]]) => [k, n])].map(([k, n]) =>
       h('button', { class: `cat ${homeCat === k ? 'on' : ''}`, onclick: () => { homeCat = k; render(); } }, n))),
     h('div', { class: 'grid' }, list.map((t) =>
-      h('button', { class: 'card', style: `--hue:${CATS[t.cat][1]}`, onclick: () => go(t.id) },
-        h('div', { class: 'ic' }, t.ic), h('h3', {}, t.name), h('p', {}, t.desc)))),
+      h('button', { class: `card ${canUse(t) ? '' : 'locked'}`, style: `--hue:${CATS[t.cat][1]}`, onclick: () => go(t.id) },
+        h('div', { class: 'ic' }, t.ic), h('h3', {}, t.name, !canUse(t) && h('span', { class: 'lockmark', title: '需登入' }, ' 🔒')),
+        h('p', {}, t.desc)))),
     h('p', { class: 'foot' }, '小技巧：處理完可以直接把結果「接著」丟進下一個工具，不必重新上傳。'));
 }
 
@@ -463,7 +484,7 @@ function resultView() {
       h('button', { class: 'btn ghost sm', onclick: () => navigator.clipboard.writeText(single.text).then(() => flash('已複製')) }, '複製文字')),
       h('pre', {}, single.text.slice(0, 200000))],
     single && single.type === 'application/pdf' && h('div', { class: 'chain' }, h('span', { style: 'color:var(--muted);font-size:13px;align-self:center' }, '接著用：'),
-      CHAIN.filter((id) => id !== S.tool.id).map((id) => h('button', { onclick: () => chainTo(id, single) }, `${byId[id].ic} ${byId[id].name}`))));
+      CHAIN.filter((id) => id !== S.tool.id && canUse(byId[id])).map((id) => h('button', { onclick: () => chainTo(id, single) }, `${byId[id].ic} ${byId[id].name}`))));
 }
 const progressText = () => `${S.progress < 1 ? `上傳中 ${Math.round((S.progress || 0) * 100)}%` : '處理中…'}${S.batch ? `（${S.batch}）` : ''}`;
 function paintProgress() { const el = $('#prog'); if (el) el.textContent = progressText(); }
@@ -490,6 +511,9 @@ function renderTool() {
   return h('div', {},
     h('div', { class: 'tool-head' }, h('button', { class: 'back', onclick: () => go('') }, '←'),
       h('div', {}, h('h2', {}, `${t.ic} ${t.name}`), h('p', {}, t.desc))),
+    !S.authed && h('div', { class: 'guest' }, '訪客模式：這個工具在你的瀏覽器裡執行，檔案不會上傳。',
+      ['watermark', 'numbers', 'header'].includes(t.id) && '文字僅支援英數字（中文請登入）。',
+      t.id === 'merge' && '不會建立書籤（登入版會）。'),
     h('div', { class: 'layout' },
       h('div', {}, drop, !t.organizer && list,
         t.organizer && S.files.length > 0 && h('div', { class: 'files' }, S.files.map(fileRow)),
@@ -518,7 +542,10 @@ function flash(msg) {
 /* ───────────── chrome ───────────── */
 
 $('#home').addEventListener('click', (e) => { e.preventDefault(); go(''); });
-$('#logout').addEventListener('click', async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; });
+$('#logout').addEventListener('click', async () => {
+  if (!S.authed) { toLogin(location.hash); return; }
+  await fetch('/api/logout', { method: 'POST' }); location.href = '/';
+});
 $('#theme').addEventListener('click', () => {
   const root = document.documentElement;
   const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -526,9 +553,15 @@ $('#theme').addEventListener('click', () => {
   try { localStorage.setItem('theme', root.dataset.theme); } catch {}
 });
 try { const th = localStorage.getItem('theme'); if (th) document.documentElement.dataset.theme = th; } catch {}
-fetch('/api/me').then((r) => r.json()).then((m) => { if (!m.auth) $('#logout').classList.add('hidden'); }).catch(() => {});
 // Dropping a file anywhere on the page shouldn't navigate away.
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => { e.preventDefault(); if (S.tool && !e.target.closest('.drop')) addFiles([...e.dataTransfer.files]); });
 window.addEventListener('hashchange', route);
-route();
+fetch('/api/me').then((r) => r.json()).catch(() => ({ user: null, auth: true })).then((m) => {
+  S.authed = !!m.user || !m.auth;
+  const btn = $('#logout');
+  if (!m.auth) btn.classList.add('hidden');
+  btn.textContent = S.authed ? '登出' : '登入';
+  $('.badge').textContent = S.authed ? '🔒 記憶體處理 · 不留存' : '🔒 訪客 · 瀏覽器內處理';
+  route();
+});

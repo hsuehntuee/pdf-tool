@@ -31,12 +31,14 @@ app = FastAPI(title="PDF Tool", docs_url=None, redoc_url=None, openapi_url=None)
 throttle = Throttle()
 
 PUBLIC = ("/login", "/api/login", "/static/", "/favicon", "/manifest.webmanifest", "/healthz")
+# Guests get the UI and run the browser-only ("edge") tools locally; every server tool needs login.
+GUEST_PAGES = ("/", "/api/me", "/api/logout")
 
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
     path = request.url.path
-    if AUTH_ON and not path.startswith(PUBLIC) and not request.session.get("user"):
+    if AUTH_ON and path not in GUEST_PAGES and not path.startswith(PUBLIC) and not request.session.get("user"):
         if path.startswith("/api/"):
             return JSONResponse({"error": "請先登入"}, status_code=401)
         return RedirectResponse("/login")

@@ -37,7 +37,11 @@ def make_png(w=400, h=300):
 @pytest.fixture(scope="module")
 def client():
     c = TestClient(app)
-    assert c.get("/api/me").status_code == 401
+    # Guests may load the UI and /api/me, but every server-side tool stays locked.
+    assert c.get("/", follow_redirects=False).status_code == 200
+    assert c.get("/api/me").json()["user"] is None
+    for path in ("/api/run/compress", "/api/run/merge", "/api/info", "/api/thumbs"):
+        assert c.post(path).status_code == 401
     assert c.post("/api/login", json={"user": "admin", "password": "nope"}).status_code == 401
     assert c.post("/api/login", json={"user": "admin", "password": "secret123"}).status_code == 200
     return c
